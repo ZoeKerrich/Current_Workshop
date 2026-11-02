@@ -1,0 +1,372 @@
+---
+title: "maps_neotomaWorkshop"
+output: html_document
+date: "2026-10-26"
+---
+
+```{r setup, echo=FALSE}
+options(warn = -1)
+pacman::p_load(dplyr, tidyr, ggplot2, sf, geojsonsf, leaflet, DT, readr, stringr, rioja, neotoma2, readxl)
+local_fp <- "C:/Users/zk326/OneDrive - Drexel University/Documents/"
+explorerURL <- "http://apps.neotomadb.org/explorer/"
+```
+
+```{r customLeaflet, echo=FALSE}
+# adapted from `plotLeaflet` -- drops clustering
+
+plotLeaflet_nocluster <- function(object){
+  explorerURL <- "http://apps.neotomadb.org/explorer/"
+  df1 <- as.data.frame(object)
+  map1 <- leaflet(df1) %>%
+    addTiles(urlTemplate = 'http://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png') %>%
+    addCircleMarkers(lng = df1$long,
+                     lat = df1$lat,
+                     popup = paste0("<b>", df1$sitename,
+                                    "</b><br><b>Description:</b> ",
+                                    df1$description,
+                                    "<br><a href=", 
+                                    explorerURL, "?siteids=",
+                                    df1$siteid,
+                                    ">Explorer Link</a>"),
+                    options = markerOptions(riseOnHover = TRUE))
+  return(map1)
+}
+
+```
+
+
+#### North American Diatoms {.tabset}
+We'll start by querying the database for sites with diatom surface samples in North America.
+
+Here, we use the `datasettype` parameter allows us to search for those specific sites. We'll include a generic leaflet plot to see the general distribution of those sites.
+If you need the full list of available dataset types, run `neotoma2::get_table('datasettypes')`. (See "Dataset Types" section of "A Simple Workflow" for more information.)
+
+To restrict the geography of our selection, we restrict our query with the `loc` parameter, and pull in an `sf` object of North America.
+
+##### Code: download data
+```{r northAmericaDiatom_setup, eval=FALSE}
+# based on North America geojson from geo2day and OSM: https://geo2day.com/north_america.html
+# removed piece in Asia, kept as single polygon
+
+northAmerica_geojson <- '{ "type": "Polygon", "coordinates": [[ [ -114.551021, 8.243424 ], [ -100.890972, 5.57228 ], [ -92.224904, 14.528089 ], [ -92.215719, 14.541424 ], [ -92.213745, 14.553013 ], [ -92.182331, 14.573283 ], [ -92.161045, 14.646372 ], [ -92.144651, 14.654344 ], [ -92.145853, 14.68025 ], [ -92.141047, 14.689715 ], [ -92.152119, 14.734544 ], [ -92.155895, 14.770235 ], [ -92.179756, 14.84276 ], [ -92.144394, 14.868976 ], [ -92.133923, 14.889548 ], [ -92.144566, 14.965848 ], [ -92.142162, 14.991054 ], [ -92.089977, 15.010951 ], [ -92.068005, 15.045933 ], [ -92.057608, 15.071329 ], [ -92.208172, 15.260974 ], [ -92.14514, 15.3644 ], [ -91.73003, 16.072624 ], [ -90.438873, 16.071091 ], [ -90.42128, 16.09755 ], [ -90.42582, 16.243368 ], [ -90.36597, 16.37167 ], [ -90.38612, 16.41403 ], [ -90.47572, 16.46254 ], [ -90.547828, 16.485324 ], [ -90.58075, 16.47693 ], [ -90.62018, 16.57474 ], [ -90.680693, 16.710966 ], [ -91.26217, 17.18693 ], [ -91.4179, 17.21305 ], [ -91.43341, 17.24601 ], [ -90.986527, 17.250229 ], [ -90.985228, 17.281262 ], [ -90.984247, 17.812629 ], [ -90.366326, 17.809168 ], [ -89.1391, 17.81344 ], [ -89.13973, 17.95423 ], [ -89.02484, 17.9995 ], [ -88.99783, 17.95056 ], [ -88.98711, 17.94322 ], [ -88.94982, 17.94975 ], [ -88.93739, 17.92976 ], [ -88.9241, 17.91508 ], [ -88.91209, 17.90611 ], [ -88.88123, 17.89264 ], [ -88.85808, 17.89101 ], [ -88.84036, 17.9289 ], [ -88.78258, 17.9735 ], [ -88.75998, 18.02208 ], [ -88.70053, 18.07303 ], [ -88.66034, 18.13192 ], [ -88.64108, 18.18045 ], [ -88.6009, 18.23771 ], [ -88.56227, 18.32867 ], [ -88.5426, 18.35952 ], [ -88.54595, 18.38234 ], [ -88.52891, 18.40783 ], [ -88.5161, 18.46097 ], [ -88.47518, 18.48961 ], [ -88.44756, 18.47362 ], [ -88.40121, 18.49327 ], [ -88.38969, 18.48 ], [ -88.37981, 18.47636 ], [ -88.32686, 18.48703 ], [ -88.28955, 18.46881 ], [ -88.284453, 18.40684 ], [ -88.046393, 18.407716 ], [ -88.03614, 18.157681 ], [ -87.913959, 18.145179 ], [ -87.363287, 17.821921 ], [ -85.49087, 18.19755 ], [ -86.79214, 24.50671 ], [ -82.89581, 23.95012 ], [ -79.84516, 24.542 ], [ -79.18945, 28.04479 ], [ -61.20258, 24.63857 ], [ -34.48789, 62.81725 ], [ -6.676794, 74.79839 ], [ -5.198412, 85.04177 ], [ -180, 85.03695 ], [ -180, 25.53 ], [ -162.729536, 15.834578 ], [ -148.974697, 15.623121 ], [ -114.551021, 8.243424 ]]]}'
+
+northAmerica_sf <- geojsonsf::geojson_sf(northAmerica_geojson)
+
+# surface samples
+diatSS_NA_sites <- neotoma2::get_sites(loc = northAmerica_sf,
+                                       datasettype = "diatom surface sample",
+                                       all_data = TRUE)
+plotLeaflet(diatSS_NA_sites)
+saveRDS(diatSS_NA_sites,paste0(local_fp,"Neotoma_Local/diatomSurfaceSamples_NorthAmerica.rds",sep = ""))
+
+# diatom (generic)
+diatom_NA_sites <- neotoma2::get_sites(loc = northAmerica_sf,
+                                       datasettype = "diatom",
+                                       all_data = TRUE)
+plotLeaflet(diatom_NA_sites)
+saveRDS(diatom_NA_sites,file = paste0(local_fp,"Neotoma_Local/diatom_NorthAmerica.rds",sep = ""))
+```
+
+##### Code: Load data
+```{r northAmericaDiatom_loadData, eval=FALSE}
+# surface samples
+diatSS_NA_sites <- readRDS(paste0(local_fp,"Neotoma_Local/diatomSurfaceSamples_NorthAmerica.rds",sep = ""))
+plotLeaflet(diatSS_NA_sites)
+
+# diatom (generic)
+diatom_NA_sites <- readRDS(paste0(local_fp,"Neotoma_Local/diatom_NorthAmerica.rds",sep = ""))
+plotLeaflet(diatom_NA_sites)
+
+```
+
+
+##### Results
+
+```{r northAmericaDiatom_Plot, echo=FALSE}
+# surface samples
+diatSS_NA_sites <- readRDS(paste0(local_fp,"Neotoma_Local/diatomSurfaceSamples_NorthAmerica.rds",sep = ""))
+plotLeaflet(diatSS_NA_sites)
+
+# diatom (generic)
+diatom_NA_sites <- readRDS(paste0(local_fp,"Neotoma_Local/diatom_NorthAmerica.rds",sep = ""))
+plotLeaflet(diatom_NA_sites)
+```
+
+#### Water Chemistry data availability {.tabset}
+Now, we want to see which sites with diatom data also have water chemistry data available. First, we'll query the database for sites with water chemistry data. Next, we'll compare it to sites with diatom data.
+
+##### Code: download data
+```{r waterChemAvailability_downloadData, eval=FALSE}
+# water chemistry data
+waterChem_NA_sites <- neotoma2::get_sites(loc = northAmerica_sf,
+                                          datasettype = "water chemistry",
+                                          all_data = TRUE)
+plotLeaflet(waterChem_NA_sites)
+saveRDS(waterChem_NA_sites,file = paste0(local_fp,"Neotoma_Local/waterChem_NorthAmerica.rds",sep = ""))
+
+```
+
+##### Code: load data
+```{r waterChemAvailability_loadData, eval=FALSE}
+# water chemistry data
+waterChem_NA_sites <- readRDS(paste0(local_fp,"Neotoma_Local/waterChem_NorthAmerica.rds",sep = ""))
+plotLeaflet(waterChem_NA_sites)
+
+```
+
+
+##### Results
+
+```{r waterChemAvailability_Plot, echo=FALSE}
+# water chemistry data
+waterChem_NA_sites <- readRDS(paste0(local_fp,"Neotoma_Local/waterChem_NorthAmerica.rds",sep = ""))
+plotLeaflet_nocluster(waterChem_NA_sites)
+```
+
+#### Comparing Sites for Water Chemistry and Diatoms {.tabset}
+Now we'll match our site data for water chemistry against the diatom surface samples dataset, and the general diatom data. First, we'll transform each sites object into a dataframe, and add a new field to indicate which datasets each has.
+
+##### Code
+```{r waterchem_vs_diatomSS, eval=FALSE}
+diatom_NA_sites_df <- as.data.frame(diatom_NA_sites) %>%
+  mutate(diatomGen = TRUE)
+diatSS_NA_sites_df <- as.data.frame(diatSS_NA_sites) %>%
+  mutate(diatomSS = TRUE)
+waterchem_df <- as.data.frame(waterChem_NA_sites) %>%
+  mutate(waterchem = TRUE)
+
+# diatom surface samples and water chem join
+diatSS_waterchem <- merge(diatSS_NA_sites_df,waterchem_df,
+                          by = c("siteid",
+                                 "sitename",
+                                 "lat",
+                                 "long",
+                                 "area",
+                                 "notes",
+                                "description",
+                                 "elev"),
+                          all.x = TRUE) %>%
+  mutate(waterchem = ifelse(is.na(waterchem), FALSE,waterchem))
+
+# diatom general samples and water chem join
+diatomGen_waterchem <- merge(diatom_NA_sites_df,waterchem_df,
+                          by = c("siteid",
+                                 "sitename",
+                                 "lat",
+                                 "long",
+                                 "area",
+                                 "notes",
+                                "description",
+                                 "elev"),
+                          all.x = TRUE) %>%
+  mutate(waterchem = ifelse(is.na(waterchem), FALSE,waterchem))
+
+# map for diatom surface samples and water chemistry
+# set up red/blue color palette
+pal <- leaflet::colorFactor(c("red", "blue"),
+                            domain = unique(diatSS_waterchem$waterchem))
+
+map1 <- leaflet(diatSS_waterchem) %>%
+  addTiles() %>%
+  addCircleMarkers(lng = diatSS_waterchem$long,
+                   lat = diatSS_waterchem$lat,
+                   color = pal(diatSS_waterchem$waterchem),
+                   popup = paste0("<b>", diatSS_waterchem$sitename,
+                                  "</b><br><b>Description:</b> ",
+                                  diatSS_waterchem$description,
+                                  "<br><a href=", 
+                                  explorerURL, "?siteids=",
+                                  diatSS_waterchem$siteid,
+                                  ">Explorer Link</a>",
+                                  "<br> Water Chemistry Data:",
+                                  diatSS_waterchem$waterchem,
+                                  "<br> Diatom Surface Sample Data:",
+                                  diatSS_waterchem$diatomSS),
+                   options = markerOptions(riseOnHover = TRUE))
+
+map1
+
+# map for diatom general samples and water chemistry
+# set up red/blue color palette
+pal <- leaflet::colorFactor(c("red", "blue"),
+                            domain = unique(diatomGen_waterchem$waterchem))
+
+map2 <- leaflet(diatomGen_waterchem) %>%
+  addTiles() %>%
+  addCircleMarkers(lng = diatomGen_waterchem$long,
+                   lat = diatomGen_waterchem$lat,
+                   color = pal(diatomGen_waterchem$waterchem),
+                   popup = paste0("<b>", diatomGen_waterchem$sitename,
+                                  "</b><br><b>Description:</b> ",
+                                  diatomGen_waterchem$description,
+                                  "<br><a href=", 
+                                  explorerURL, "?siteids=",
+                                  diatomGen_waterchem$siteid,
+                                  ">Explorer Link</a>",
+                                  "<br> Water Chemistry Data:",
+                                  diatomGen_waterchem$waterchem,
+                                  "<br> Diatom General Sample Data:",
+                                  diatomGen_waterchem$diatomGen),
+                   options = markerOptions(riseOnHover = TRUE))
+
+map2
+
+```
+
+##### Results
+```{r waterchem_vs_diatomSS_plot, echo=FALSE}
+diatom_NA_sites_df <- as.data.frame(diatom_NA_sites) %>%
+  mutate(diatomGen = TRUE)
+diatSS_NA_sites_df <- as.data.frame(diatSS_NA_sites) %>%
+  mutate(diatomSS = TRUE)
+waterchem_df <- as.data.frame(waterChem_NA_sites) %>%
+  mutate(waterchem = TRUE)
+
+# diatom surface samples and water chem join
+diatSS_waterchem <- merge(diatSS_NA_sites_df,waterchem_df,
+                          by = c("siteid",
+                                 "sitename",
+                                 "lat",
+                                 "long",
+                                 "area",
+                                 "notes",
+                                "description",
+                                 "elev"),
+                          all.x = TRUE) %>%
+  mutate(waterchem = ifelse(is.na(waterchem), FALSE,waterchem))
+
+# diatom general samples and water chem join
+diatomGen_waterchem <- merge(diatom_NA_sites_df,waterchem_df,
+                          by = c("siteid",
+                                 "sitename",
+                                 "lat",
+                                 "long",
+                                 "area",
+                                 "notes",
+                                "description",
+                                 "elev"),
+                          all.x = TRUE) %>%
+  mutate(waterchem = ifelse(is.na(waterchem), FALSE,waterchem))
+
+# map for diatom surface samples and water chemistry
+# set up red/blue color palette
+pal <- leaflet::colorFactor(c("red", "blue"),
+                            domain = unique(diatSS_waterchem$waterchem))
+
+map1 <- leaflet(diatSS_waterchem) %>%
+  addTiles() %>%
+  addCircleMarkers(lng = diatSS_waterchem$long,
+                   lat = diatSS_waterchem$lat,
+                   color = pal(diatSS_waterchem$waterchem),
+                   popup = paste0("<b>", diatSS_waterchem$sitename,
+                                  "</b><br><b>Description:</b> ",
+                                  diatSS_waterchem$description,
+                                  "<br><a href=", 
+                                  explorerURL, "?siteids=",
+                                  diatSS_waterchem$siteid,
+                                  ">Explorer Link</a>",
+                                  "<br> Water Chemistry Data:",
+                                  diatSS_waterchem$waterchem,
+                                  "<br> Diatom Surface Sample Data:",
+                                  diatSS_waterchem$diatomSS),
+                   options = markerOptions(riseOnHover = TRUE))
+
+map1
+
+# map for diatom general samples and water chemistry
+# set up red/blue color palette
+pal <- leaflet::colorFactor(c("red", "blue"),
+                            domain = unique(diatomGen_waterchem$waterchem))
+
+map2 <- leaflet(diatomGen_waterchem) %>%
+  addTiles() %>%
+  addCircleMarkers(lng = diatomGen_waterchem$long,
+                   lat = diatomGen_waterchem$lat,
+                   color = pal(diatomGen_waterchem$waterchem),
+                   popup = paste0("<b>", diatomGen_waterchem$sitename,
+                                  "</b><br><b>Description:</b> ",
+                                  diatomGen_waterchem$description,
+                                  "<br><a href=", 
+                                  explorerURL, "?siteids=",
+                                  diatomGen_waterchem$siteid,
+                                  ">Explorer Link</a>",
+                                  "<br> Water Chemistry Data:",
+                                  diatomGen_waterchem$waterchem,
+                                  "<br> Diatom General Sample Data:",
+                                  diatomGen_waterchem$diatomGen),
+                   options = markerOptions(riseOnHover = TRUE))
+
+map2
+
+```
+
+### Using Aggregate Datasets {.tabset}
+In some instances, the collection of datasets you may want to use may not align neatly with specific sites. For example, if a project spans multiple sites, but other sampling has occurred at some of those sites, not every dataset at each of those sites is necessarily relevant to your work.
+
+To handle this in our own work at the Academy, we have collated specific aggregate datasets -- generally, sets of diatom and associated water chemistry data. These site and dataset IDs are stored in excel spreadsheets. Here, we will walk through how to extract these IDs from excel and use them to load data from Neotoma.
+
+In this example, we'll use dataset IDs identified for an aggregate dataset for all of North America (and compare it to the pull directly from Neotoma above based on site locations).
+
+#### Code: download data
+```{r load_AD_downloadData, eval = FALSE}
+sheet_name <- "North America"
+xl_fp <- paste0(local_fp, "Neotoma_Local/Aggregate Datasets - Diatoms - Neotoma - 6 Jan2024.xlsx")
+aggData_df <- read_xlsx(xl_fp, sheet = sheet_name) %>%
+  select(`Neotoma Site ID`,
+         `Site name`,
+         `Neotoma Water Chemistry Dataset ID`,
+         `Neotoma Diatom Dataset Id`,
+         `Aggregate dataset label`,
+         `Aggregate dataset name`)
+
+## pull site IDs, use that in combination with dataset IDs
+aggData_siteIDs <- aggData_df %>% 
+  drop_na(`Neotoma Site ID`) %>%
+  select(`Neotoma Site ID`) %>%
+  as.list()
+
+aggData_waterChem_dl <- get_sites(sites = aggData_siteIDs,
+                                  all_data = TRUE) %>% 
+  neotoma2::filter(datasetid %in% aggData_df$`Neotoma Water Chemistry Dataset ID`) %>%
+  get_downloads(all_data = TRUE)
+
+aggData_diatom_dl <- pull(aggData_df,`Neotoma Site ID`) %>% 
+  get_sites(all_data = TRUE) %>% 
+  neotoma2::filter(datasetid %in% aggData_df$`Neotoma Diatom Dataset Id`) %>%
+  get_downloads(all_data = TRUE)
+
+saveRDS(aggData_waterChem_dl,
+        file = paste0(local_fp,
+                      "Neotoma_Local/aggData_WaterChem.rds",
+                      sep = ""))
+
+saveRDS(aggData_diatom_dl,
+        file = paste0(local_fp,
+                      "Neotoma_Local/aggData_DiatomSamples.rds",
+                      sep = ""))
+
+```
+
+#### Code: load data
+```{r load_AD_loadData, eval = FALSE}
+aggData_waterChem_dl <- saveRDS(file = paste0(local_fp,
+                      "Neotoma_Local/aggData_WaterChem.rds",
+                      sep = ""))
+
+aggData_diatom_dl <- saveRDS(file = paste0(local_fp,
+                      "Neotoma_Local/aggData_DiatomSamples.rds",
+                      sep = ""))
+
+aggData_samples_waterChem <- samples(aggData_waterChem_dl)
+aggData_samples_diatom <- samples(aggData_diatom_dl)
+
+aggData_diatom_tx <- taxa(aggData_diatom_dl)
+
+```
+
+
+#### Results
+```{r load_AD_results, echo = FALSE}
+
+```
+
