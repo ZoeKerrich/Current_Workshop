@@ -6,7 +6,7 @@ date: "2026-10-26"
 
 ```{r setup, echo=FALSE}
 options(warn = -1)
-pacman::p_load(dplyr, tidyr, ggplot2, sf, geojsonsf, leaflet, DT, readr, stringr, rioja, neotoma2, readxl,maps,ggtext)
+pacman::p_load(dplyr, tidyr, ggplot2, sf, geojsonsf, leaflet, DT, readr, stringr, rioja, neotoma2, readxl,maps,ggtext,geodata)
 local_fp <- "C:/Users/zk326/OneDrive - Drexel University/Documents/"
 explorerURL <- "http://apps.neotomadb.org/explorer/"
 ```
@@ -610,4 +610,179 @@ ggplot() +
    guides(color = guide_legend("pH"),
          size = guide_legend("Observations"))
 ```
+### Leveraging Climate Data {.tabset}
+Here we'll borrow some code from "A Simple Workflow" and adjust it to be more specific to work with diatoms. We'll pick a specific taxa: [PICK TAXA] and conduct an initial visual inspection for a relationship between its prevalence and several climate variables: [PICK VARIABLES]
+
+This code is modified from a previous version of "A Simple Workflow:"
+
+### 4.3. Distributions in Climate (July max temperature) from Rasters
+
+We are often interested in the interaction between taxa and climate, assuming that time is a proxy for changing environments. The development of large-scale global datasets for climate has made it relatively straightforward to access data from the cloud in raster format.  R provides a number of tools (in the `sf` and `raster` packages) for managing spatial data, and providing support for spatial analysis of data.
+
+The first step is taking our sample data and turning it into a spatial object using the `sf` package in R:
+
+```{r makeSamplesSpatial}
+modern <- aggData_samples_diatom %>% 
+  filter(age < 1000) %>% 
+  filter(ecologicalgroup == "DIAT" & elementtype == "valve" & units == "NISP")
+
+spatial <- sf::st_as_sf(modern, 
+                        coords = c("long", "lat"),
+                        crs = "+proj=longlat +datum=WGS84")
+```
+
+The data is effectively the same, `sf` makes an object called `spatial` that is a `data.frame` with all the information from `samples()`, and a column (`geometry`) that contains the spatial data.
+
+We can use the [`worldclim_global()` function](https://search.r-project.org/CRAN/refmans/geodata/html/worldclim.html) in the `geodata` package to get climate data from WorldClim (geodata also has many other types of global data available!). The operations that follow here can be applied to any sort of raster data, provided it is loaded into R as a `raster` object.
+
+You can load several types of monthly average climate data from WorldClim:
+| Variable | Description | Unit |
+| -------- | ----------- |------|
+| tmin | minimum temperature | °C |
+| tmax | maximum temperature | °C |
+| tavg | average temperature | °C |
+| prec | total precipitation | mm |
+| srad | incident solar radiation | kJ m-2 day-1 |
+| wind | wind speed (2 m above the ground) | m s-1 |
+| vapr | vapor pressure | kPa |
+
+
+Here we pull in the raster data, at a 10 minute (spatial, not temporal) resolution for the $T_{max}$ and $T_{min}$, maximum and minimum monthly temperatures, respectively.  The raster itself has 12 layers, one for each month.  We'll use the `extract()` function to just get the maximum temperature for July, and the minimum temperature for February (roughly, the max in the hottest month and min in the coldest month).
+
+```{r worldTmax}
+#worldTmax <- raster::getData('worldclim', var = 'tmax', res = 10)
+worldTmax <- worldclim_global(var = "tmax", res = 10, path = tempdir(), version="2.1")
+worldTmin = worldclim_global(var = "tmin", res = 10, path = tempdir(), version="2.1")
+
+spatial$tmax7 <- raster::extract(worldTmax, spatial)[,7]
+spatial$tmin2 <- raster::extract(worldTmin, spatial)[,2]
+
+```
+
+This adds a column to the `data.frame` `spatial`, that contains the maximum July temperature and minimum January temperature for each taxon at each site (all taxa at a site will share the same value). We have `r length(unique(spatial$variablename))` distinct names for the taxa.  We're going to use `dplyr`'s `mutate()` function to extract just the genus:
+
+```{r toGenus}
+spatial2 <- spatial %>%
+  mutate(variablename = stringr::str_replace(variablename, "[[:punct:]]", " ")) %>% 
+  mutate(variablename = stringr::word(variablename, 1)) %>% 
+  group_by(variablename, siteid, sitename) %>% 
+  summarise(tmax7 = max(tmax7),
+            tmin2 = min(tmin2),
+            count_sum = sum(value),
+            .groups = "keep") %>%
+  mutate(trange = tmax7-tmin2) %>%
+  group_by(variablename) %>% 
+  filter(n() > 20)
+```
+
+#### 4.3.1. Taxa specific mapping
+Let's take a look (and map) some data for a specific genus: Aulacoseira.
+First, we'll plot it with ggplot2, and then with Leaflet.
+```{r Aulacoseira_focus}
+aul <- spatial2 %>%
+  filter(variablename == "Aulacoseira")
+
+head(aul)
+
+aul2 <- aul %>%
+  mutate(lon = sf::st_coordinates(geometry)[,1],
+         lat = sf::st_coordinates(geometry)[,2])
+
+ggplot() + 
+  annotation_map(
+    map_data("world"),
+    fill = "white", colour = "darkgrey"
+  ) +
+  geom_point(data = aul2, aes(x =lon,
+                              y =lat,
+                              size = count_sum,
+                              color = tmax7))+
+  scale_color_viridis_c(option = "inferno", direction = -1) +
+  guides(color = guide_legend("max temp"),
+         size = guide_legend("Observations"))+
+  labs(title = "Max Temperature")
+
+ggplot() + 
+  annotation_map(
+    map_data("world"),
+    fill = "white", colour = "darkgrey"
+  ) +
+  geom_point(data = aul2, aes(x =lon,
+                              y =lat,
+                              size = count_sum,
+                              color = tmin2))+
+  scale_color_viridis_c(option = "mako") +
+  guides(color = guide_legend("min temp"),
+         size = guide_legend("Observations"))+
+  labs(title = "Min Temperature")
+
+```
+
+```{r Aulacoseira_focus_leaflet}
+# leaflet map
+# set up palettes
+pal_hot <- leaflet::colorBin("inferno",
+                            domain = aul2$tmax7,
+                            bins = 5,
+                            reverse = TRUE)
+
+pal_cold <- leaflet::colorBin("mako",
+                            domain = aul2$tmin2,
+                            bins = 5)
+
+aul_tmax <- leaflet(aul2) %>%
+  addTiles() %>%
+  addCircleMarkers(lng = aul2$lon,
+                   lat = aul2$lat,
+                   radius = ~ scales::rescale(aul2$count_sum, to = c(5,30)),
+                   color = pal_hot(aul2$tmax7),
+                   popup = paste0("<b>", aul2$sitename,
+                                  "</b><br><a href=", 
+                                  explorerURL, "?siteids=",
+                                  aul2$siteid,
+                                  ">Explorer Link</a>",
+                                  "<br> <b>Max temp: </b>",
+                                  round(aul2$tmax7,2),
+                                  "<br> <b>Min temp: </b>",
+                                  round(aul2$tmin2,2),
+                                  "<br><b>Observations: </b>",
+                                  aul2$count_sum),
+                   options = markerOptions(riseOnHover = TRUE)) %>%
+  addLegend("bottomright",
+            pal = pal_hot,
+            values = ~tmax7,
+            title = "Max Temperature in July",
+            opacity = 1)
+
+aul_tmin <- leaflet(aul2) %>%
+  addTiles() %>%
+  addCircleMarkers(lng = aul2$lon,
+                   lat = aul2$lat,
+                   radius = ~ scales::rescale(aul2$count_sum, to = c(5,30)),
+                   color = pal_cold(aul2$tmin2),
+                   popup = paste0("<b>", aul2$sitename,
+                                  "</b><br><a href=", 
+                                  explorerURL, "?siteids=",
+                                  aul2$siteid,
+                                  ">Explorer Link</a>",
+                                  "<br> <b>Max temp: </b>",
+                                  round(aul2$tmax7,2),
+                                  "<br> <b>Min temp: </b>",
+                                  round(aul2$tmin2,2),
+                                  "<br><b>Observations: </b>",
+                                  aul2$count_sum),
+                   options = markerOptions(riseOnHover = TRUE)) %>%
+  addLegend("bottomright",
+            pal = pal_cold,
+            values = ~tmin2,
+            title = "Min Temperature in February",
+            opacity = 1)
+
+aul_tmax
+aul_tmin
+
+```
+
+
+
 
