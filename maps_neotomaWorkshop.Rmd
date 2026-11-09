@@ -6,7 +6,7 @@ date: "2026-10-26"
 
 ```{r setup, echo=FALSE}
 options(warn = -1)
-pacman::p_load(dplyr, tidyr, ggplot2, sf, geojsonsf, leaflet, DT, readr, stringr, rioja, neotoma2, readxl)
+pacman::p_load(dplyr, tidyr, ggplot2, sf, geojsonsf, leaflet, DT, readr, stringr, rioja, neotoma2, readxl,maps,ggtext)
 local_fp <- "C:/Users/zk326/OneDrive - Drexel University/Documents/"
 explorerURL <- "http://apps.neotomadb.org/explorer/"
 ```
@@ -300,12 +300,12 @@ map2
 
 ```
 
-### Using Aggregate Datasets {.tabset}
+### Using Aggregate Datasets: Loading data {.tabset}
 In some instances, the collection of datasets you may want to use may not align neatly with specific sites. For example, if a project spans multiple sites, but other sampling has occurred at some of those sites, not every dataset at each of those sites is necessarily relevant to your work.
 
 To handle this in our own work at the Academy, we have collated specific aggregate datasets -- generally, sets of diatom and associated water chemistry data. These site and dataset IDs are stored in excel spreadsheets. Here, we will walk through how to extract these IDs from excel and use them to load data from Neotoma.
 
-In this example, we'll use dataset IDs identified for an aggregate dataset for all of North America (and compare it to the pull directly from Neotoma above based on site locations).
+In this example, we'll use dataset IDs identified for an aggregate dataset for all of North America, and set up some dataframes for further analysis.
 
 #### Code: download data
 ```{r load_AD_downloadData, eval = FALSE}
@@ -325,13 +325,23 @@ aggData_siteIDs <- aggData_df %>%
   select(`Neotoma Site ID`) %>%
   as.list()
 
-aggData_waterChem_dl <- get_sites(sites = aggData_siteIDs,
-                                  all_data = TRUE) %>% 
-  neotoma2::filter(datasetid %in% aggData_df$`Neotoma Water Chemistry Dataset ID`) %>%
-  get_downloads(all_data = TRUE)
+aggData_siteIDs <- unique(na.omit(aggData_df$`Neotoma Site ID`))
 
-aggData_diatom_dl <- pull(aggData_df,`Neotoma Site ID`) %>% 
-  get_sites(all_data = TRUE) %>% 
+aggData_waterChem_sites <- get_sites(aggData_siteIDs, 
+                                     datasettype = "water chemistry",
+                                     all_data = TRUE)
+
+aggData_waterChem_datasets <- get_datasets(aggData_waterChem_sites)
+
+aggData_waterChem_dl <- get_downloads(aggData_waterChem_datasets,
+                                       datasetid %in% aggData_df$`Neotoma Water Chemistry Dataset ID`,
+                                      datasettype = "water chemistry")
+
+# edit? or let run for so long?
+aggData_diatom_dl <- get_sites(aggData_siteIDs,
+                               datasettype = "diatom",
+                                  all_data = TRUE) %>% 
+  get_datasets() %>%
   neotoma2::filter(datasetid %in% aggData_df$`Neotoma Diatom Dataset Id`) %>%
   get_downloads(all_data = TRUE)
 
@@ -349,24 +359,255 @@ saveRDS(aggData_diatom_dl,
 
 #### Code: load data
 ```{r load_AD_loadData, eval = FALSE}
-aggData_waterChem_dl <- saveRDS(file = paste0(local_fp,
+aggData_waterChem_dl <- readRDS(file = paste0(local_fp,
                       "Neotoma_Local/aggData_WaterChem.rds",
                       sep = ""))
 
-aggData_diatom_dl <- saveRDS(file = paste0(local_fp,
+aggData_diatom_dl <- readRDS(file = paste0(local_fp,
                       "Neotoma_Local/aggData_DiatomSamples.rds",
                       sep = ""))
 
+# pull samples data for water chem and diatom strat samples
 aggData_samples_waterChem <- samples(aggData_waterChem_dl)
 aggData_samples_diatom <- samples(aggData_diatom_dl)
 
+# pull taxa data
 aggData_diatom_tx <- taxa(aggData_diatom_dl)
+aggData_waterChem_tx <- taxa(aggData_waterChem_dl)
 
+# Calculate each taxon's proportion within its sample,
+# then keep the samples where taxas' proportion is above 10%
+common_taxon <- aggData_samples_diatom %>%
+  filter(units == "NISP") %>%
+  group_by(sampleid) %>%
+  mutate(proportion = value / sum(value, na.rm = TRUE)) %>%
+  ungroup() %>%
+  filter(proportion > 0.10)
+
+# extract the twelve taxa that are most prevalent across the set
+# need to refine how I calculate this
+top_taxon <- common_taxon %>%
+  group_by(variablename) %>%
+  mutate(tot_taxa = sum(value, na.rm = TRUE)) %>%
+  ungroup() %>%
+  mutate(tot_prop = value / tot_taxa) %>%
+  mutate(rank = dense_rank(desc(tot_taxa))) %>%
+  ungroup() %>%
+ filter(rank <= 25)
+
+# pull out pH data from water chem
+# drop observations with a pH > 14
+waterchem_ph <- aggData_samples_waterChem %>%
+  filter(variablename == "pH") %>%
+  filter(value <= 14 & value >= 0)
+
+# leaflet map
+# set up palette
+pal <- leaflet::colorBin("viridis",
+                            domain = waterchem_ph$value)
+
+map3 <- leaflet(waterchem_ph) %>%
+  addTiles() %>%
+  addCircleMarkers(lng = waterchem_ph$long,
+                   lat = waterchem_ph$lat,
+                   color = pal(waterchem_ph$value),
+                   popup = paste0("<b>", waterchem_ph$sitename,
+                                  "</b><br><a href=", 
+                                  explorerURL, "?siteids=",
+                                  waterchem_ph$siteid,
+                                  ">Explorer Link</a>",
+                                  "<br> <b>pH:</b>",
+                                  waterchem_ph$value),
+                   options = markerOptions(riseOnHover = TRUE)) %>%
+  addLegend("bottomright",
+            pal = pal,
+            values = ~value,
+            title = "pH",
+            opacity = 1)
+
+map3
 ```
 
 
 #### Results
 ```{r load_AD_results, echo = FALSE}
+aggData_waterChem_dl <- readRDS(file = paste0(local_fp,
+                      "Neotoma_Local/aggData_WaterChem.rds",
+                      sep = ""))
 
+aggData_diatom_dl <- readRDS(file = paste0(local_fp,
+                      "Neotoma_Local/aggData_DiatomSamples.rds",
+                      sep = ""))
+
+# pull samples data for water chem and diatom strat samples
+aggData_samples_waterChem <- samples(aggData_waterChem_dl)
+aggData_samples_diatom <- samples(aggData_diatom_dl)
+
+# pull taxa data
+aggData_diatom_tx <- taxa(aggData_diatom_dl)
+aggData_waterChem_tx <- taxa(aggData_waterChem_dl)
+
+# Calculate each taxon's proportion within its sample,
+# then keep the samples where taxas' proportion is above 10%
+common_taxon <- aggData_samples_diatom %>%
+  filter(units == "NISP") %>%
+  group_by(sampleid) %>%
+  mutate(proportion = value / sum(value, na.rm = TRUE)) %>%
+  ungroup() %>%
+  filter(proportion > 0.10)
+
+# extract the twelve taxa that are most prevalent across the set
+# need to refine how I calculate this
+top_taxon <- common_taxon %>%
+  group_by(variablename) %>%
+  mutate(tot_taxa = sum(value, na.rm = TRUE)) %>%
+  ungroup() %>%
+  mutate(tot_prop = value / tot_taxa) %>%
+  mutate(rank = dense_rank(desc(tot_taxa))) %>%
+  ungroup() %>%
+ filter(rank <= 25)
+
+# pull out pH data from water chem
+# drop observations with a pH > 14
+waterchem_ph <- aggData_samples_waterChem %>%
+  filter(variablename == "pH") %>%
+  filter(value <= 14 & value >= 0)
+
+# leaflet map
+# set up palette
+pal <- leaflet::colorBin("viridis",
+                            domain = waterchem_ph$value)
+
+map3 <- leaflet(waterchem_ph) %>%
+  addTiles() %>%
+  addCircleMarkers(lng = waterchem_ph$long,
+                   lat = waterchem_ph$lat,
+                   color = pal(waterchem_ph$value),
+                   popup = paste0("<b>", waterchem_ph$sitename,
+                                  "</b><br><a href=", 
+                                  explorerURL, "?siteids=",
+                                  waterchem_ph$siteid,
+                                  ">Explorer Link</a>",
+                                  "<br> <b>pH:</b>",
+                                  waterchem_ph$value),
+                   options = markerOptions(riseOnHover = TRUE)) %>%
+  addLegend("bottomright",
+            pal = pal,
+            values = ~value,
+            title = "pH",
+            opacity = 1)
+
+map3
+```
+
+### Using Aggregate Datasets: Merging data {.tabset}
+Here, we'll join the diatom and water chemistry data we've extracted.We'll use `common_taxa` and `waterchem_ph` generated in the previous section.
+
+We know that because we've pulled datasets for diatoms and water chemistry based on sites, we should be able to group data based on `siteid`. The field `taxongroup` in the generated output dataframe will identify which records are for water chemistry, and which are diatom data. We'll summarize our data by `siteid` and select or summarize only essential fields for the dataframe we're creating for our plot.
+
+#### Code
+```{r merge_diatom_waterchem, eval = FALSE, fig.height=8, fig.width=12}
+# what are the variables in each dataframe?
+colnames(waterchem_ph)
+colnames(common_taxon)
+
+# quick peek at the data in each field
+head(waterchem_ph)
+head(common_taxon)
+
+# append datasets using `bind_rows`
+diatom_waterchem_df <- bind_rows(list("diatom" = common_taxon,
+                                      "waterchem" = waterchem_ph))
+
+# create dataframe with top taxa and pH values, by siteID
+taxa_to_join <- top_taxon %>%
+  select(c("siteid","variablename","value","rank","tot_prop","sitename","lat","long","elev")) %>%
+  group_by(siteid,sitename,lat,long,elev,variablename) %>%
+  summarize(value_sum = sum(value, na.rm = TRUE),
+            rank = first(rank),
+            tot_prop = first(tot_prop))
+
+waterchem_to_join <- waterchem_ph %>%
+  mutate(pH = value) %>%
+  select(c("siteid","sitename","lat","long","elev","pH")) %>%
+    group_by(siteid,sitename,lat,long,elev) %>%
+    summarize(ph_mean = mean(pH, na.rm = TRUE))
+
+taxa_ph_df <- left_join(taxa_to_join,waterchem_to_join,
+                        by = c("siteid",
+                        "sitename",
+                        "lat",
+                        "long",
+                        "elev")) %>%
+  filter(!is.na(ph_mean))
+
+# set up palette
+pal2 <- colorBin("viridis",
+                            domain = taxa_ph_df$ph_mean)
+
+ggplot() + 
+   annotation_map(
+    map_data("world"),
+    fill = "white", colour = "darkgrey"
+  ) +
+  geom_point(data = taxa_ph_df, mapping = aes(x = long, y = lat, size = value_sum, color = taxa_ph_df$ph_mean)) +
+    scale_color_viridis_c("pH") +
+  facet_wrap(~variablename,
+             labeller = labeller(variablename = label_wrap_gen(width = 16)))+
+   guides(color = guide_legend("pH"),
+         size = guide_legend("Observations"))
+
+```
+#### Results
+```{r merge_diatom_waterchem_plot, echo = FALSE, fig.height=8, fig.width=12}
+# what are the variables in each dataframe?
+colnames(waterchem_ph)
+colnames(common_taxon)
+
+# quick peek at the data in each field
+head(waterchem_ph)
+head(common_taxon)
+
+# append datasets using `bind_rows`
+diatom_waterchem_df <- bind_rows(list("diatom" = common_taxon,
+                                      "waterchem" = waterchem_ph))
+
+# create dataframe with top taxa and pH values, by siteID
+taxa_to_join <- top_taxon %>%
+  select(c("siteid","variablename","value","rank","tot_prop","sitename","lat","long","elev")) %>%
+  group_by(siteid,sitename,lat,long,elev,variablename) %>%
+  summarize(value_sum = sum(value, na.rm = TRUE),
+            rank = first(rank),
+            tot_prop = first(tot_prop))
+
+waterchem_to_join <- waterchem_ph %>%
+  mutate(pH = value) %>%
+  select(c("siteid","sitename","lat","long","elev","pH")) %>%
+    group_by(siteid,sitename,lat,long,elev) %>%
+    summarize(ph_mean = mean(pH, na.rm = TRUE))
+
+taxa_ph_df <- left_join(taxa_to_join,waterchem_to_join,
+                        by = c("siteid",
+                        "sitename",
+                        "lat",
+                        "long",
+                        "elev")) %>%
+  filter(!is.na(ph_mean))
+
+# set up palette
+pal2 <- colorBin("viridis",
+                            domain = taxa_ph_df$ph_mean)
+
+ggplot() + 
+   annotation_map(
+    map_data("world"),
+    fill = "white", colour = "darkgrey"
+  ) +
+  geom_point(data = taxa_ph_df, mapping = aes(x = long, y = lat, size = value_sum, color = taxa_ph_df$ph_mean)) +
+    scale_color_viridis_c("pH") +
+  facet_wrap(~variablename,
+             labeller = labeller(variablename = label_wrap_gen(width = 16)))+
+   guides(color = guide_legend("pH"),
+         size = guide_legend("Observations"))
 ```
 
