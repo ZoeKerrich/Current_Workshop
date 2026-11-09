@@ -611,7 +611,7 @@ ggplot() +
          size = guide_legend("Observations"))
 ```
 ### Leveraging Climate Data {.tabset}
-Here we'll borrow some code from "A Simple Workflow" and adjust it to be more specific to work with diatoms. We'll pick a specific taxa: [PICK TAXA] and conduct an initial visual inspection for a relationship between its prevalence and several climate variables: [PICK VARIABLES]
+Here we'll borrow some code from "A Simple Workflow" and adjust it to be more specific to work with diatoms. We'll pick a specific genus: Aulacoseira, and conduct an initial visual inspection for a relationship between its prevalence and minimum and maximum monthly temperatures.
 
 This code is modified from a previous version of "A Simple Workflow:"
 
@@ -636,6 +636,7 @@ The data is effectively the same, `sf` makes an object called `spatial` that is 
 We can use the [`worldclim_global()` function](https://search.r-project.org/CRAN/refmans/geodata/html/worldclim.html) in the `geodata` package to get climate data from WorldClim (geodata also has many other types of global data available!). The operations that follow here can be applied to any sort of raster data, provided it is loaded into R as a `raster` object.
 
 You can load several types of monthly average climate data from WorldClim:
+
 | Variable | Description | Unit |
 | -------- | ----------- |------|
 | tmin | minimum temperature | °C |
